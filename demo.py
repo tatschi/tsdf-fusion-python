@@ -1,4 +1,4 @@
-"""Fuse 1000 RGB-D images from the 7-scenes dataset into a TSDF voxel volume with 2cm resolution.
+"""Fuse 1000 depth images from the 7-scenes dataset into a TSDF voxel volume with 2cm resolution.
 """
 
 import time
@@ -39,20 +39,19 @@ if __name__ == "__main__":
   print("Initializing voxel volume...")
   tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.02)
 
-  # Loop through RGB-D images and fuse them together
+  # Loop through images and fuse them together
   t0_elapse = time.time()
   for i in range(n_imgs):
     print("Fusing frame %d/%d"%(i+1, n_imgs))
 
     # Read RGB-D image and camera pose
-    color_image = cv2.cvtColor(cv2.imread("data/frame-%06d.color.jpg"%(i)), cv2.COLOR_BGR2RGB)
     depth_im = cv2.imread("data/frame-%06d.depth.png"%(i),-1).astype(float)
     depth_im /= 1000.
     depth_im[depth_im == 65.535] = 0
     cam_pose = np.loadtxt("data/frame-%06d.pose.txt"%(i))
 
-    # Integrate observation into voxel volume (assume color aligned with depth)
-    tsdf_vol.integrate(color_image, depth_im, cam_intr, cam_pose, obs_weight=1.)
+    # Integrate observation into voxel volume
+    tsdf_vol.integrate(depth_im, cam_intr, cam_pose, obs_weight=1.)
 
   fps = n_imgs / (time.time() - t0_elapse)
   print("Average FPS: {:.2f}".format(fps))
