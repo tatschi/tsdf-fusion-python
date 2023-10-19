@@ -295,26 +295,18 @@ class TSDFVolume:
   def get_volume(self):
     if self.gpu_mode:
       cuda.memcpy_dtoh(self._tsdf_vol_cpu, self._tsdf_vol_gpu)
-      cuda.memcpy_dtoh(self._color_vol_cpu, self._color_vol_gpu)
-    return self._tsdf_vol_cpu, self._color_vol_cpu
+    return self._tsdf_vol_cpu
 
   def get_point_cloud(self):
     """Extract a point cloud from the voxel volume.
     """
-    tsdf_vol, color_vol = self.get_volume()
+    tsdf_vol = self.get_volume()
 
     # Marching cubes
     verts = measure._marching_cubes_lewiner.marching_cubes(tsdf_vol, level=0)[0]
-    verts_ind = np.round(verts).astype(int)
     verts = verts*self._voxel_size + self._vol_origin
 
-    # Get vertex colors
-    rgb_vals = color_vol[verts_ind[:, 0], verts_ind[:, 1], verts_ind[:, 2]]
-    colors_b = np.floor(rgb_vals / self._color_const)
-    colors_g = np.floor((rgb_vals - colors_b*self._color_const) / 256)
-    colors_r = rgb_vals - colors_b*self._color_const - colors_g*256
-    colors = np.floor(np.asarray([colors_r, colors_g, colors_b])).T
-    colors = colors.astype(np.uint8)
+    colors = np.ones(verts.shape) * 255
 
     pc = np.hstack([verts, colors])
     return pc
@@ -322,20 +314,13 @@ class TSDFVolume:
   def get_mesh(self):
     """Compute a mesh from the voxel volume using marching cubes.
     """
-    tsdf_vol, color_vol = self.get_volume()
+    tsdf_vol = self.get_volume()
 
     # Marching cubes
     verts, faces, norms, vals = measure._marching_cubes_lewiner.marching_cubes(tsdf_vol, level=0)
-    verts_ind = np.round(verts).astype(int)
     verts = verts*self._voxel_size+self._vol_origin  # voxel grid coordinates to world coordinates
 
-    # Get vertex colors
-    rgb_vals = color_vol[verts_ind[:,0], verts_ind[:,1], verts_ind[:,2]]
-    colors_b = np.floor(rgb_vals/self._color_const)
-    colors_g = np.floor((rgb_vals-colors_b*self._color_const)/256)
-    colors_r = rgb_vals-colors_b*self._color_const-colors_g*256
-    colors = np.floor(np.asarray([colors_r,colors_g,colors_b])).T
-    colors = colors.astype(np.uint8)
+    colors = np.ones(verts.shape) * 255
     return verts, faces, norms, colors
 
 
