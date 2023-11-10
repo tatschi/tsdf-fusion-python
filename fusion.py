@@ -173,8 +173,8 @@ class TSDFVolume:
         cx, cy = intr[0, 2], intr[1, 2]
         pix = np.empty((cam_pts.shape[0], 2), dtype=np.int64)
         for i in prange(cam_pts.shape[0]):
-            pix[i, 0] = int(np.round((cam_pts[i, 0] * fx / cam_pts[i, 2]) + cx))
-            pix[i, 1] = int(np.round((cam_pts[i, 1] * fy / cam_pts[i, 2]) + cy))
+            pix[i, 0] = int(np.round((cam_pts[i, 0] / fx) + cx))
+            pix[i, 1] = int(np.round((cam_pts[i, 1] / fy) + cy))
         return pix
 
     @staticmethod
@@ -303,14 +303,25 @@ def get_view_frustum(depth_im, cam_intr, cam_pose):
     im_w = depth_im.shape[1]
     max_depth = np.max(depth_im)
     view_frust_pts = np.array([
-        (np.array([0, 0, 0, im_w, im_w]) - cam_intr[0, 2]) * np.array([0, max_depth, max_depth, max_depth, max_depth]) /
+        (np.array([0, 0, im_w, im_w, 0, 0, im_w, im_w]) - cam_intr[0, 2]) *
         cam_intr[0, 0],
-        (np.array([0, 0, im_h, 0, im_h]) - cam_intr[1, 2]) * np.array([0, max_depth, max_depth, max_depth, max_depth]) /
+        (np.array([0, 0, 0, 0, im_h, im_h, im_h, im_h]) - cam_intr[1, 2]) *
         cam_intr[1, 1],
-        np.array([0, max_depth, max_depth, max_depth, max_depth])
+        np.array([0, max_depth, 0, max_depth, 0, max_depth, 0, max_depth])
     ])
     view_frust_pts = rigid_transform(view_frust_pts.T, cam_pose).T
     return view_frust_pts
+
+
+def get_point_3d_from_depth_pixel(depth_im, cam_intr, cam_pose, x, y):
+    point_3d = np.array([
+        (x - cam_intr[0, 2]) * cam_intr[0, 0],
+        (y - cam_intr[1, 2]) * cam_intr[1, 1],
+        depth_im[x, y],
+        1
+    ])
+    point_3d = np.dot(cam_pose, point_3d)
+    return point_3d[:3]
 
 
 def meshwrite(filename, verts, faces, norms, colors):

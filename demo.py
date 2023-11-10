@@ -1,12 +1,17 @@
 """Fuse 1000 depth images from the 7-scenes dataset into a TSDF voxel volume with 2cm resolution.
 """
-
+import os
 import time
 
 import cv2
 import numpy as np
 
 import fusion
+
+DATA_PATH = "data/2023-10-13"
+CAM_INTR_PATH = os.path.join(DATA_PATH, "camera-intrinsics.txt")
+DEPTH_PATH = lambda x: os.path.join(DATA_PATH, "depth/frame-%02d.png" % x)
+CAM_POSE_PATH = lambda x: os.path.join(DATA_PATH, "pose/frame-%02d.pose.txt" % x)
 
 if __name__ == "__main__":
     # ======================================================================================================== #
@@ -15,15 +20,16 @@ if __name__ == "__main__":
     # frustums in the dataset
     # ======================================================================================================== #
     print("Estimating voxel volume bounds...")
-    n_imgs = 1000
-    cam_intr = np.loadtxt("data/demo/camera-intrinsics.txt", delimiter=' ')
+    n_imgs = 1
+    cam_intr = np.loadtxt(CAM_INTR_PATH, delimiter=' ')
     vol_bnds = np.zeros((3, 2))
     for i in range(n_imgs):
         # Read depth image and camera pose
-        depth_im = cv2.imread("data/demo/frame-%06d.depth.png" % i, -1).astype(float)
+        depth_im = cv2.imread(DEPTH_PATH(i+1), -1).astype(float)
         depth_im /= 1000.  # depth is saved in 16-bit PNG in millimeters
-        depth_im[depth_im == 65.535] = 0  # set invalid depth to 0 (specific to 7-scenes dataset)
-        cam_pose = np.loadtxt("data/demo/frame-%06d.pose.txt" % i)  # 4x4 rigid transformation matrix
+        depth_im[depth_im == 65.535] = 0
+        cam_pose = np.loadtxt(CAM_POSE_PATH(i+1))  # 4x4 rigid transformation matrix
+        #cam_pose = np.eye(4)
 
         # Compute camera view frustum and extend convex hull
         view_frust_pts = fusion.get_view_frustum(depth_im, cam_intr, cam_pose)
@@ -36,7 +42,7 @@ if __name__ == "__main__":
     # ======================================================================================================== #
     # Initialize voxel volume
     print("Initializing voxel volume...")
-    tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.02)
+    tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.002)
 
     # Loop through images and fuse them together
     t0_elapse = time.time()
@@ -44,10 +50,11 @@ if __name__ == "__main__":
         print("Fusing frame %d/%d" % (i + 1, n_imgs))
 
         # Read RGB-D image and camera pose
-        depth_im = cv2.imread("data/demo/frame-%06d.depth.png" % i, -1).astype(float)
+        depth_im = cv2.imread(DEPTH_PATH(i+1), -1).astype(float)
         depth_im /= 1000.
         depth_im[depth_im == 65.535] = 0
-        cam_pose = np.loadtxt("data/demo/frame-%06d.pose.txt" % i)
+        cam_pose = np.loadtxt(CAM_POSE_PATH(i+1))
+        #cam_pose = np.eye(4)
 
         # Integrate observation into voxel volume
         tsdf_vol.integrate(depth_im, cam_intr, cam_pose, obs_weight=1.)
