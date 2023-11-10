@@ -199,11 +199,15 @@ class TSDFVolume:
     """
         # TODO implement GPU mode
         world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
-        # TODO find voxel for each point
-        # then compute diff to depth
-        voxel_index = np.floor((pointcloud[:, :2] - self._vol_origin[:2]) / self._voxel_size)
-        voxel_index = np.asarray(voxel_index, dtype=np.int64)
-        depth_diff = pointcloud[:, 2] - world_coords[voxel_index, 2]
+        depth_diff = []
+        for i in range(pointcloud.shape[0]):
+            voxel_index_xy = np.asarray(np.floor((pointcloud[i, :2] - self._vol_origin[:2]) / self._voxel_size),
+                                        dtype=np.int64)
+            voxel_indices = np.where((self.vox_coords[:, :2] == voxel_index_xy).all(axis=1))
+            depth_diff_for_point = [pointcloud[i, 2] - world_coords[j, 2] for j in voxel_indices]
+            depth_diff.extend(depth_diff_for_point)
+
+        depth_diff = np.asarray(depth_diff)
         valid_pts = depth_diff >= -self._trunc_margin
         valid_dist = depth_diff[valid_pts]
         self._tsdf_vol_cpu, self._weight_vol_cpu = self.integrate_tsdf(self._tsdf_vol_cpu, valid_dist,
