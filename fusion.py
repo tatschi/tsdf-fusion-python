@@ -199,7 +199,7 @@ class TSDFVolume:
     """
         # TODO implement GPU mode
         world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
-        depth_diff = pointcloud - world_coords
+        depth_diff = pointcloud[:, 2] - world_coords[:, 2]
         valid_pts = depth_diff >= -self._trunc_margin
         valid_dist = depth_diff[valid_pts]
         self._tsdf_vol_cpu, self._weight_vol_cpu = self.integrate_tsdf(self._tsdf_vol_cpu, valid_dist,
