@@ -37,7 +37,7 @@ if __name__ == "__main__":
     # ======================================================================================================== #
     # Initialize voxel volume
     print("Initializing voxel volume...")
-    tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.01)
+    tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.001)
 
     # Loop through images and fuse them together
     t0_elapse = time.time()
