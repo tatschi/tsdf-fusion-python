@@ -199,7 +199,11 @@ class TSDFVolume:
     """
         # TODO implement GPU mode
         world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
-        depth_diff = pointcloud[:, 2] - world_coords[:, 2]
+        # TODO find voxel for each point
+        # then compute diff to depth
+        voxel_index = np.floor((pointcloud[:, :2] - self._vol_origin[:2]) / self._voxel_size)
+        voxel_index = np.asarray(voxel_index, dtype=np.int64)
+        depth_diff = pointcloud[:, 2] - world_coords[voxel_index, 2]
         valid_pts = depth_diff >= -self._trunc_margin
         valid_dist = depth_diff[valid_pts]
         self._tsdf_vol_cpu, self._weight_vol_cpu = self.integrate_tsdf(self._tsdf_vol_cpu, valid_dist,
@@ -263,9 +267,10 @@ def get_view_frustum(depth_im, cam_intr, cam_pose):
 
 
 def get_vol_bnds(pointclouds):
+    computational_margin = 0.01
     vol_bnds = np.zeros((3, 2))
-    vol_bnds[:, 0] = np.min(pointclouds, axis=1)
-    vol_bnds[:, 1] = np.max(pointclouds, axis=1)
+    vol_bnds[:, 0] = np.min(pointclouds, axis=1) - computational_margin
+    vol_bnds[:, 1] = np.max(pointclouds, axis=1) + computational_margin
     return vol_bnds
 
 
