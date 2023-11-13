@@ -199,17 +199,25 @@ class TSDFVolume:
     """
         # TODO implement GPU mode
         world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
-        depth_diff = -np.ones(world_coords.shape[0])
-        for i in range(pointcloud.shape[0]):
-            voxel_index_xy = np.asarray(np.floor((pointcloud[i, :2] - self._vol_origin[:2]) / self._voxel_size),
+        depth_diff = np.zeros(world_coords.shape[0])
+        for point in pointcloud:
+            voxel_index_xy = np.asarray(np.floor((point[:2] - self._vol_origin[:2]) / self._voxel_size),
                                         dtype=np.int64)
-            voxel_indices = np.where((self.vox_coords[:, :2] == voxel_index_xy).all(axis=1))
-            depth_diff[voxel_indices] = pointcloud[i, 2] - world_coords[voxel_indices, 2]
+            voxel_index_mask = np.logical_and(self.vox_coords[:, 0] == voxel_index_xy[0], self.vox_coords[:, 1] == voxel_index_xy[1])
+            voxel_indices = np.argwhere(voxel_index_mask)
+            depth_diff[voxel_indices] = point[2] - world_coords[voxel_indices, 2]
 
-        valid_pts = np.logical_and(depth_diff != -1, depth_diff >= -self._trunc_margin)
-        valid_dist = depth_diff[valid_pts]
-        self._tsdf_vol_cpu, self._weight_vol_cpu = self.integrate_tsdf(self._tsdf_vol_cpu, valid_dist,
-                                                                       self._weight_vol_cpu, obs_weight)
+        valid_pts = np.logical_and(depth_diff > 0, depth_diff >= -self._trunc_margin)
+        dist = np.minimum(1, depth_diff / self._trunc_margin)
+        valid_vox_x = self.vox_coords[valid_pts, 0]
+        valid_vox_y = self.vox_coords[valid_pts, 1]
+        valid_vox_z = self.vox_coords[valid_pts, 2]
+        w_old = self._weight_vol_cpu[valid_vox_x, valid_vox_y, valid_vox_z]
+        tsdf_vals = self._tsdf_vol_cpu[valid_vox_x, valid_vox_y, valid_vox_z]
+        valid_dist = dist[valid_pts]
+        tsdf_vol_new, w_new = self.integrate_tsdf(tsdf_vals, valid_dist, w_old, obs_weight)
+        self._weight_vol_cpu[valid_vox_x, valid_vox_y, valid_vox_z] = w_new
+        self._tsdf_vol_cpu[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
 
     def get_volume(self):
         if self.gpu_mode:
@@ -222,7 +230,7 @@ class TSDFVolume:
         tsdf_vol = self.get_volume()
 
         # Marching cubes
-        verts = measure._marching_cubes_lewiner.marching_cubes(tsdf_vol, level=0)[0]
+        verts = measure._marching_cubes_lewiner.marching_cubes(tsdf_vol, level=0.2)[0]
         verts = verts * self._voxel_size + self._vol_origin
 
         colors = np.ones(verts.shape) * 255
@@ -236,7 +244,7 @@ class TSDFVolume:
         tsdf_vol = self.get_volume()
 
         # Marching cubes
-        verts, faces, norms, vals = measure._marching_cubes_lewiner.marching_cubes(tsdf_vol, level=0)
+        verts, faces, norms, vals = measure._marching_cubes_lewiner.marching_cubes(tsdf_vol, level=0.2)
         verts = verts * self._voxel_size + self._vol_origin  # voxel grid coordinates to world coordinates
 
         colors = np.ones(verts.shape) * 255
