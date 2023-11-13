@@ -277,9 +277,10 @@ def get_view_frustum(depth_im, cam_intr, cam_pose):
 
 
 def get_vol_bnds(pointclouds):
+    pointclouds = np.vstack(pointclouds)
     vol_bnds = np.zeros((3, 2))
-    vol_bnds[:, 0] = np.min(pointclouds, axis=1)
-    vol_bnds[:, 1] = np.max(pointclouds, axis=1)
+    vol_bnds[:, 0] = np.min(pointclouds, axis=0)
+    vol_bnds[:, 1] = np.max(pointclouds, axis=0)
     return vol_bnds
 
 
