@@ -10,7 +10,7 @@ import fusion
 import open3d as o3d
 
 DATA_PATH = "data/2023-07-10"
-DEPTH_PATH = lambda x: os.path.join(DATA_PATH, "depth/frame-%02d.ply" % x)
+FRAME_FILENAME = lambda x: os.path.join(DATA_PATH, "frame-%02d.ply" % x)
 
 if __name__ == "__main__":
     # ======================================================================================================== #
@@ -22,7 +22,7 @@ if __name__ == "__main__":
     pointclouds = []
     for i in range(n_imgs):
         # Read depth image and camera pose
-        pc = o3d.io.read_point_cloud(DEPTH_PATH(i+1))
+        pc = o3d.io.read_point_cloud(FRAME_FILENAME(i + 1))
         pc_points = np.asarray(pc.points)
         pointclouds.append(pc_points)
 
