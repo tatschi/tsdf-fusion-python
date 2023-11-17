@@ -10,9 +10,7 @@ import fusion
 import open3d as o3d
 
 DATA_PATH = "data/2023-07-10"
-CAM_INTR_PATH = os.path.join(DATA_PATH, "camera-intrinsics.txt")
 DEPTH_PATH = lambda x: os.path.join(DATA_PATH, "depth/frame-%02d.ply" % x)
-CAM_POSE_PATH = lambda x: os.path.join(DATA_PATH, "pose/frame-%02d.pose.txt" % x)
 
 if __name__ == "__main__":
     # ======================================================================================================== #
@@ -20,7 +18,7 @@ if __name__ == "__main__":
     # in world coordinates of the convex hull of all points in all point clouds
     # ======================================================================================================== #
     print("Estimating voxel volume bounds...")
-    n_imgs = 1
+    n_imgs = 8
     pointclouds = []
     for i in range(n_imgs):
         # Read depth image and camera pose
@@ -37,7 +35,7 @@ if __name__ == "__main__":
     # ======================================================================================================== #
     # Initialize voxel volume
     print("Initializing voxel volume...")
-    tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.001)
+    tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.005)
 
     # Loop through images and fuse them together
     t0_elapse = time.time()

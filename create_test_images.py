@@ -4,10 +4,8 @@ import numpy as np
 import open3d as o3d
 
 DATA_PATH = "data/test-images"
-CAM_INTR_PATH = os.path.join(DATA_PATH, "camera-intrinsics.txt")
 DEPTH_PATH = lambda x: os.path.join(DATA_PATH, "depth/frame-%02d.png" % x)
 PC_PATH = lambda x: os.path.join(DATA_PATH, "depth/frame-%02d.ply" % x)
-CAM_POSE_PATH = lambda x: os.path.join(DATA_PATH, "pose/frame-%02d.pose.txt" % x)
 
 
 def main():
