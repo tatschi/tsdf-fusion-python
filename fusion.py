@@ -16,6 +16,8 @@ except Exception as err:
     print('Failed to import PyCUDA. Running fusion in CPU mode.')
     FUSION_GPU_MODE = 0
 
+FUSION_GPU_MODE = 1
+
 
 class TSDFVolume:
     """Volumetric TSDF Fusion of depth Images.
@@ -29,6 +31,9 @@ class TSDFVolume:
         xyz bounds (min/max) in meters.
       voxel_size (float): The volume discretization in meters.
     """
+        self._n_gpu_loops = None
+        self._max_gpu_grid_dim = None
+        self._max_gpu_threads_per_block = None
         vol_bnds = np.asarray(vol_bnds)
         assert vol_bnds.shape == (3, 2), "[!] `vol_bnds` should be of shape (3, 2)."
 
@@ -49,93 +54,72 @@ class TSDFVolume:
         )
 
         # Initialize pointers to voxel volume in CPU memory
-        self._tsdf_vol_cpu = np.ones(self._vol_dim).astype(np.float32)
+        self._tsdf_vol = np.ones(self._vol_dim).astype(np.float32)
         # for computing the cumulative moving average of observations per voxel
-        self._weight_vol_cpu = np.zeros(self._vol_dim).astype(np.float32)
+        self._weight_vol = np.zeros(self._vol_dim).astype(np.float32)
 
         self.gpu_mode = use_gpu and FUSION_GPU_MODE
 
-        # Copy voxel volumes to GPU
         if self.gpu_mode:
-            self._tsdf_vol_gpu = cuda.mem_alloc(self._tsdf_vol_cpu.nbytes)
-            cuda.memcpy_htod(self._tsdf_vol_gpu, self._tsdf_vol_cpu)
-            self._weight_vol_gpu = cuda.mem_alloc(self._weight_vol_cpu.nbytes)
-            cuda.memcpy_htod(self._weight_vol_gpu, self._weight_vol_cpu)
 
             # Cuda kernel function (C++)
             self._cuda_src_mod = SourceModule("""
-        __global__ void integrate(float * tsdf_vol,
-                                  float * weight_vol,
-                                  float * vol_dim,
+        __global__ void find_voxels_for_points(
                                   float * vol_origin,
-                                  float * cam_intr,
-                                  float * cam_pose,
                                   float * other_params,
-                                  float * depth_im) {
-          // Get voxel index
+                                  float * point_cloud_x,
+                                  float * point_cloud_y,
+                                  int * voxels_x,
+                                  int * voxels_y) {
           int gpu_loop_idx = (int) other_params[0];
           int max_threads_per_block = blockDim.x;
           int block_idx = blockIdx.z*gridDim.y*gridDim.x+blockIdx.y*gridDim.x+blockIdx.x;
-          int voxel_idx = gpu_loop_idx*gridDim.x*gridDim.y*gridDim.z*max_threads_per_block+block_idx*max_threads_per_block+threadIdx.x;
-          int vol_dim_x = (int) vol_dim[0];
-          int vol_dim_y = (int) vol_dim[1];
-          int vol_dim_z = (int) vol_dim[2];
-          if (voxel_idx > vol_dim_x*vol_dim_y*vol_dim_z)
-              return;
-          // Get voxel grid coordinates (note: be careful when casting)
-          float voxel_x = floorf(((float)voxel_idx)/((float)(vol_dim_y*vol_dim_z)));
-          float voxel_y = floorf(((float)(voxel_idx-((int)voxel_x)*vol_dim_y*vol_dim_z))/((float)vol_dim_z));
-          float voxel_z = (float)(voxel_idx-((int)voxel_x)*vol_dim_y*vol_dim_z-((int)voxel_y)*vol_dim_z);
-          // Voxel grid coordinates to world coordinates
+          int point_idx = gpu_loop_idx*gridDim.x*gridDim.y*gridDim.z*max_threads_per_block+block_idx*max_threads_per_block+threadIdx.x;
+          
+          // get point values
+          float point_x = point_cloud_x[point_idx];
+          float point_y = point_cloud_y[point_idx];
+          
+          // point coordinates to voxel grid coordinates
           float voxel_size = other_params[1];
-          float pt_x = vol_origin[0]+voxel_x*voxel_size;
-          float pt_y = vol_origin[1]+voxel_y*voxel_size;
-          float pt_z = vol_origin[2]+voxel_z*voxel_size;
-          // World coordinates to camera coordinates
-          float tmp_pt_x = pt_x-cam_pose[0*4+3];
-          float tmp_pt_y = pt_y-cam_pose[1*4+3];
-          float tmp_pt_z = pt_z-cam_pose[2*4+3];
-          float cam_pt_x = cam_pose[0*4+0]*tmp_pt_x+cam_pose[1*4+0]*tmp_pt_y+cam_pose[2*4+0]*tmp_pt_z;
-          float cam_pt_y = cam_pose[0*4+1]*tmp_pt_x+cam_pose[1*4+1]*tmp_pt_y+cam_pose[2*4+1]*tmp_pt_z;
-          float cam_pt_z = cam_pose[0*4+2]*tmp_pt_x+cam_pose[1*4+2]*tmp_pt_y+cam_pose[2*4+2]*tmp_pt_z;
-          // Camera coordinates to image pixels
-          int pixel_x = (int) roundf(cam_intr[0*3+0]*(cam_pt_x/cam_pt_z)+cam_intr[0*3+2]);
-          int pixel_y = (int) roundf(cam_intr[1*3+1]*(cam_pt_y/cam_pt_z)+cam_intr[1*3+2]);
-          // Skip if outside view frustum
-          int im_h = (int) other_params[2];
-          int im_w = (int) other_params[3];
-          if (pixel_x < 0 || pixel_x >= im_w || pixel_y < 0 || pixel_y >= im_h || cam_pt_z<0)
+          voxels_x[point_idx] = (int) floorf((float)(point_x - vol_origin[0]) / (float) voxel_size);
+          voxels_y[point_idx] = (int) floorf((float)(point_y - vol_origin[1]) / (float) voxel_size);
+        }        
+        
+                 
+        __global__ void integrate_point_cloud(
+                                  float * vol_origin,
+                                  float * other_params,
+                                  int * voxels_z,
+                                  float * points_z,
+                                  float * dists) {
+          int gpu_loop_idx = (int) other_params[0];
+          int max_threads_per_block = blockDim.x;
+          int block_idx = blockIdx.z*gridDim.y*gridDim.x+blockIdx.y*gridDim.x+blockIdx.x;
+          int dists_idx = gpu_loop_idx*gridDim.x*gridDim.y*gridDim.z*max_threads_per_block+block_idx*max_threads_per_block+threadIdx.x;
+          
+          float voxel_size = other_params[1];
+          float trunc_margin = other_params[2];
+          
+          // Get voxel grid z-coordinate
+          float voxel_z = voxels_z[dists_idx];
+          
+          // Get point coordinate
+          float point_z = points_z[dists_idx];
+                    
+          // Voxel grid z-coordinate to world coordinate
+          float voxel_world_z = vol_origin[2]+voxel_z*voxel_size;
+    
+          float depth_diff = point_z - voxel_world_z;
+          if (0 < depth_diff || depth_diff < -trunc_margin){            
               return;
-          // Skip invalid depth
-          float depth_value = depth_im[pixel_y*im_w+pixel_x];
-          if (depth_value == 0)
-              return;
-          // Integrate TSDF
-          float trunc_margin = other_params[4];
-          float depth_diff = depth_value-cam_pt_z;
-          if (depth_diff < -trunc_margin)
-              return;
-          float dist = fmin(1.0f,depth_diff/trunc_margin);
-          float w_old = weight_vol[voxel_idx];
-          float obs_weight = other_params[5];
-          float w_new = w_old + obs_weight;
-          weight_vol[voxel_idx] = w_new;
-          tsdf_vol[voxel_idx] = (tsdf_vol[voxel_idx]*w_old+obs_weight*dist)/w_new;
-        }""")
+          }
+          dists[dists_idx] = fmin(1.0f,depth_diff/trunc_margin);
+        } 
+        """)
 
-            self._cuda_integrate = self._cuda_src_mod.get_function("integrate")
-
-            # Determine block/grid size on GPU
-            gpu_dev = cuda.Device(0)
-            self._max_gpu_threads_per_block = gpu_dev.MAX_THREADS_PER_BLOCK
-            n_blocks = int(np.ceil(float(np.prod(self._vol_dim)) / float(self._max_gpu_threads_per_block)))
-            grid_dim_x = min(gpu_dev.MAX_GRID_DIM_X, int(np.floor(np.cbrt(n_blocks))))
-            grid_dim_y = min(gpu_dev.MAX_GRID_DIM_Y, int(np.floor(np.sqrt(n_blocks / grid_dim_x))))
-            grid_dim_z = min(gpu_dev.MAX_GRID_DIM_Z, int(np.ceil(float(n_blocks) / float(grid_dim_x * grid_dim_y))))
-            self._max_gpu_grid_dim = np.array([grid_dim_x, grid_dim_y, grid_dim_z]).astype(int)
-            self._n_gpu_loops = int(np.ceil(float(np.prod(self._vol_dim)) / float(
-                np.prod(self._max_gpu_grid_dim) * self._max_gpu_threads_per_block)))
-
+            self._cuda_find_voxels = self._cuda_src_mod.get_function("find_voxels_for_points")
+            self._cuda_integrate = self._cuda_src_mod.get_function("integrate_point_cloud")
         else:
             # Get voxel grid coordinates
             xv, yv, zv = np.meshgrid(
@@ -197,32 +181,126 @@ class TSDFVolume:
       obs_weight (float): The weight to assign for the current observation. A higher
         value
     """
-        # TODO implement GPU mode
-        world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
-        depth_diff = np.zeros(world_coords.shape[0])
-        for point in pointcloud:
-            voxel_index_xy = np.asarray(np.floor((point[:2] - self._vol_origin[:2]) / self._voxel_size),
-                                        dtype=np.int64)
-            voxel_index_mask = np.logical_and(self.vox_coords[:, 0] == voxel_index_xy[0], self.vox_coords[:, 1] == voxel_index_xy[1])
-            voxel_indices = np.argwhere(voxel_index_mask)
-            depth_diff[voxel_indices] = point[2] - world_coords[voxel_indices, 2]
+        if self.gpu_mode:
+            # TODO implement GPU mode
+            pointcloud_x = np.array(pointcloud[:, 0].copy(order='C')).astype(np.float32)
+            pointcloud_y = np.array(pointcloud[:, 1].copy(order='C')).astype(np.float32)
+            pointcloud_z = np.array(pointcloud[:, 2].copy(order='C')).astype(np.float32)
 
-        valid_pts = np.logical_and(depth_diff > 0, depth_diff >= -self._trunc_margin)
-        dist = np.minimum(1, depth_diff / self._trunc_margin)
-        valid_vox_x = self.vox_coords[valid_pts, 0]
-        valid_vox_y = self.vox_coords[valid_pts, 1]
-        valid_vox_z = self.vox_coords[valid_pts, 2]
-        w_old = self._weight_vol_cpu[valid_vox_x, valid_vox_y, valid_vox_z]
-        tsdf_vals = self._tsdf_vol_cpu[valid_vox_x, valid_vox_y, valid_vox_z]
-        valid_dist = dist[valid_pts]
-        tsdf_vol_new, w_new = self.integrate_tsdf(tsdf_vals, valid_dist, w_old, obs_weight)
-        self._weight_vol_cpu[valid_vox_x, valid_vox_y, valid_vox_z] = w_new
-        self._tsdf_vol_cpu[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
+            voxels_x = np.zeros(len(pointcloud)).astype(np.int32)
+            voxels_y = np.zeros(len(pointcloud)).astype(np.int32)
+
+            # Run integration
+            self.init_gpu_grid(len(pointcloud))
+            for gpu_loop_idx in range(self._n_gpu_loops):
+                self._cuda_find_voxels(cuda.InOut(self._vol_origin.astype(np.float32)),
+                                       cuda.InOut(np.asarray([
+                                           gpu_loop_idx,
+                                           self._voxel_size,
+                                           self._trunc_margin,
+                                           obs_weight
+                                       ], np.float32)),
+                                       cuda.InOut(pointcloud_x),
+                                       cuda.InOut(pointcloud_y),
+                                       cuda.InOut(voxels_x),
+                                       cuda.InOut(voxels_y),
+                                       block=(self._max_gpu_threads_per_block, 1, 1),
+                                       grid=(
+                                           int(self._max_gpu_grid_dim[0]),
+                                           int(self._max_gpu_grid_dim[1]),
+                                           int(self._max_gpu_grid_dim[2]),
+                                       )
+                                       )
+
+            # repeat all values for all possible z values
+            voxels_x = np.repeat(voxels_x, self._vol_dim[2]).astype(np.int32)
+            voxels_y = np.repeat(voxels_y, self._vol_dim[2]).astype(np.int32)
+            points_z = np.repeat(pointcloud_z, self._vol_dim[2]).astype(np.float32)
+
+            z_vals = np.arange(self._vol_dim[2])
+            voxels_z = np.tile(z_vals, len(pointcloud)).astype(np.int32)
+
+            dists = np.zeros(len(points_z)).astype(np.float32)
+
+            self.init_gpu_grid(len(points_z))
+            for gpu_loop_idx in range(self._n_gpu_loops):
+                self._cuda_integrate(cuda.InOut(self._vol_origin.astype(np.float32)),
+                                     cuda.InOut(np.asarray([
+                                         gpu_loop_idx,
+                                         self._voxel_size,
+                                         self._trunc_margin,
+                                         obs_weight
+                                     ], np.float32)),
+                                     cuda.InOut(voxels_z),
+                                     cuda.InOut(points_z),
+                                     cuda.InOut(dists),
+                                     block=(self._max_gpu_threads_per_block, 1, 1),
+                                     grid=(
+                                         int(self._max_gpu_grid_dim[0]),
+                                         int(self._max_gpu_grid_dim[1]),
+                                         int(self._max_gpu_grid_dim[2]),
+                                     )
+                                     )
+
+            for i in range(len(dists)):
+                voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
+                w_old = self._weight_vol[voxel_index]
+                w_new = w_old + obs_weight
+                self._weight_vol[voxel_index] = w_new
+                tsdf_old = self._tsdf_vol[voxel_index]
+                self._tsdf_vol[voxel_index] = (tsdf_old * w_old + obs_weight * dists[i]) / w_new
+
+        else:
+            world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
+            depth_diff = np.zeros(world_coords.shape[0])
+            for point in pointcloud:
+                voxel_index_xy = np.asarray(np.floor((point[:2] - self._vol_origin[:2]) / self._voxel_size),
+                                            dtype=np.int64)
+                voxel_index_mask = np.logical_and(self.vox_coords[:, 0] == voxel_index_xy[0],
+                                                  self.vox_coords[:, 1] == voxel_index_xy[1])
+                voxel_indices = np.argwhere(voxel_index_mask)
+
+                depth_diff[voxel_indices] = point[2] - world_coords[voxel_indices, 2]
+
+                # TODO maybe optimize this because it is only updating one voxel at a time
+                valid_pts = np.logical_and(depth_diff > 0, depth_diff >= -self._trunc_margin)
+                dist = np.minimum(1, depth_diff / self._trunc_margin)
+                valid_vox_x = self.vox_coords[valid_pts, 0]
+                valid_vox_y = self.vox_coords[valid_pts, 1]
+                valid_vox_z = self.vox_coords[valid_pts, 2]
+                w_old = self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z]
+                tsdf_vals = self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z]
+                valid_dist = dist[valid_pts]
+                tsdf_vol_new, w_new = self.integrate_tsdf(tsdf_vals, valid_dist, w_old, obs_weight)
+                self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z] = w_new
+                self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
+
+    def init_gpu_grid(self, n_points):
+        gpu_dev = cuda.Device(0)
+        self._max_gpu_threads_per_block = gpu_dev.MAX_THREADS_PER_BLOCK
+        n_blocks_required = int(np.ceil(float(n_points) / float(self._max_gpu_threads_per_block)))
+        self.init_gpu_grid_dim_from_n_blocks_required(gpu_dev, n_blocks_required)
+        n_blocks_per_loop = np.prod(self._max_gpu_grid_dim)
+        n_threads = n_blocks_per_loop * self._max_gpu_threads_per_block
+        self._n_gpu_loops = int(np.ceil(float(n_points) / float(n_threads)))
+
+    def init_gpu_grid_dim_from_n_blocks_required(self, gpu_dev, n_blocks_required):
+        remaining_required_blocks = float(n_blocks_required)
+        grid_dim_x = int(np.floor(np.cbrt(remaining_required_blocks)))
+        grid_dim_x = min(gpu_dev.MAX_GRID_DIM_X, grid_dim_x)
+
+        remaining_required_blocks /= float(grid_dim_x)
+        grid_dim_y = int(np.floor(np.sqrt(remaining_required_blocks)))
+        grid_dim_y = min(gpu_dev.MAX_GRID_DIM_Y, grid_dim_y)
+
+        remaining_required_blocks /= float(grid_dim_y)
+        grid_dim_z = int(np.ceil(remaining_required_blocks))
+        grid_dim_z = min(gpu_dev.MAX_GRID_DIM_Z, grid_dim_z)
+
+        self._max_gpu_grid_dim = np.array([grid_dim_x, grid_dim_y, grid_dim_z]).astype(int)
 
     def get_volume(self):
-        if self.gpu_mode:
-            cuda.memcpy_dtoh(self._tsdf_vol_cpu, self._tsdf_vol_gpu)
-        return self._tsdf_vol_cpu
+        return self._tsdf_vol
 
     def get_point_cloud(self):
         """Extract a point cloud from the voxel volume.
