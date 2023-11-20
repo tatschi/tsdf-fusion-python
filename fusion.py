@@ -16,8 +16,6 @@ except Exception as err:
     print('Failed to import PyCUDA. Running fusion in CPU mode.')
     FUSION_GPU_MODE = 0
 
-FUSION_GPU_MODE = 1
-
 
 class TSDFVolume:
     """Volumetric TSDF Fusion of depth Images.
