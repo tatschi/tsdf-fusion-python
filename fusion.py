@@ -101,10 +101,7 @@ class TSDFVolume:
           float voxel_size = other_params[1];
           float trunc_margin = other_params[2];
           
-          // Get voxel grid z-coordinate
           float voxel_z = voxels_z[dists_idx];
-          
-          // Get point coordinate
           float point_z = points_z[dists_idx];
                     
           // Voxel grid z-coordinate to world coordinate
