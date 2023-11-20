@@ -9,8 +9,12 @@ FRAME_FILENAME = lambda x: os.path.join(DATA_PATH, "frame-%02d.ply" % x)
 def main():
     x_vals = np.linspace(0, 1, 100)
     y_vals = np.linspace(0, 1, 100)
+    x_vals, y_vals = np.meshgrid(x_vals, y_vals)
+    x_vals = x_vals.flatten()
+    y_vals = y_vals.flatten()
+
     z_vals = np.zeros(x_vals.shape)
-    z_vals[30:60] = 1
+    z_vals[0:5000] = 1
     pointcloud = np.zeros((len(x_vals), 3))
     pointcloud[:, 0] = x_vals
     pointcloud[:, 1] = y_vals
