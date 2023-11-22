@@ -42,7 +42,7 @@ __global__ void integrate_point_cloud(
   float voxel_world_z = vol_origin[2]+voxel_z*voxel_size;
 
   float depth_diff = point_z - voxel_world_z;
-  if (0 < depth_diff || depth_diff < -trunc_margin){
+  if (depth_diff <= 0 || depth_diff < -trunc_margin){
       return;
   }
   dists[dists_idx] = fmin(1.0f,depth_diff/trunc_margin);
