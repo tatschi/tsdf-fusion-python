@@ -250,7 +250,7 @@ class TSDFVolume:
         else:
             world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
             depth_diff = np.zeros(world_coords.shape[0])
-            for point in pointcloud:
+            for point, color in zip(pointcloud, colors):
                 voxel_index_xy = np.asarray(np.floor((point[:2] - self._vol_origin[:2]) / self._voxel_size),
                                             dtype=np.int64)
                 voxel_index_mask = np.logical_and(self.vox_coords[:, 0] == voxel_index_xy[0],

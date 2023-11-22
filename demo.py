@@ -9,7 +9,7 @@ import numpy as np
 import fusion
 import open3d as o3d
 
-DATA_PATH = "data/2023-07-10"
+DATA_PATH = "data/2023-10-13"
 FRAME_FILENAME = lambda x: os.path.join(DATA_PATH, "frame-%02d.ply" % x)
 
 if __name__ == "__main__":
@@ -18,12 +18,13 @@ if __name__ == "__main__":
     # in world coordinates of the convex hull of all points in all point clouds
     # ======================================================================================================== #
     print("Estimating voxel volume bounds...")
-    n_imgs = 8
+    n_imgs = 1
     pointclouds = []
     colors_list = []
     for i in range(n_imgs):
         # Read depth image and camera pose
         pc = o3d.io.read_point_cloud(FRAME_FILENAME(i + 1))
+        pc = o3d.io.read_point_cloud(DATA_PATH + "/supersampled.ply")
         pc_points = np.asarray(pc.points)
         colors = np.asarray(pc.colors)
         pointclouds.append(pc_points)
@@ -38,7 +39,7 @@ if __name__ == "__main__":
     # ======================================================================================================== #
     # Initialize voxel volume
     print("Initializing voxel volume...")
-    tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.005)
+    tsdf_vol = fusion.TSDFVolume(vol_bnds, voxel_size=0.002)
 
     # Loop through images and fuse them together
     t0_elapse = time.time()
