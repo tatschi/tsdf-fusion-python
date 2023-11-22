@@ -20,11 +20,14 @@ if __name__ == "__main__":
     print("Estimating voxel volume bounds...")
     n_imgs = 8
     pointclouds = []
+    colors_list = []
     for i in range(n_imgs):
         # Read depth image and camera pose
         pc = o3d.io.read_point_cloud(FRAME_FILENAME(i + 1))
         pc_points = np.asarray(pc.points)
+        colors = np.asarray(pc.colors)
         pointclouds.append(pc_points)
+        colors_list.append(colors)
 
     vol_bnds = fusion.get_vol_bnds(pointclouds)
 
@@ -43,7 +46,7 @@ if __name__ == "__main__":
         print("Fusing frame %d/%d" % (i + 1, n_imgs))
 
         # Integrate observation into voxel volume
-        tsdf_vol.integrate(pointclouds[i], obs_weight=1.)
+        tsdf_vol.integrate(pointclouds[i], colors_list[i])
 
     fps = n_imgs / (time.time() - t0_elapse)
     print("Average FPS: {:.2f}".format(fps))

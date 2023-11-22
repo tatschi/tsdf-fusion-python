@@ -168,7 +168,7 @@ class TSDFVolume:
             tsdf_vol_int[i] = (w_old[i] * tsdf_vol[i] + obs_weight * dist[i]) / w_new[i]
         return tsdf_vol_int, w_new
 
-    def integrate(self, pointcloud, obs_weight=1.):
+    def integrate(self, pointcloud, colors):
         """Integrate a depth frame into the TSDF volume.
 
     Args:
@@ -177,7 +177,9 @@ class TSDFVolume:
         value
     """
         if self.gpu_mode:
-            # TODO implement GPU mode
+            # TODO calculate obs_weight based on color
+            obs_weight = 1.
+            # TODO fix GPU mode
             pointcloud_x = np.array(pointcloud[:, 0].copy(order='C')).astype(np.float32)
             pointcloud_y = np.array(pointcloud[:, 1].copy(order='C')).astype(np.float32)
             pointcloud_z = np.array(pointcloud[:, 2].copy(order='C')).astype(np.float32)
@@ -266,6 +268,9 @@ class TSDFVolume:
                 w_old = self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z]
                 tsdf_vals = self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z]
                 valid_dist = dist[valid_pts]
+                # TODO calculate obs_weight based on color
+                #obs_weight = color[1]
+                obs_weight = 1
                 tsdf_vol_new, w_new = self.integrate_tsdf(tsdf_vals, valid_dist, w_old, obs_weight)
                 self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z] = w_new
                 self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
