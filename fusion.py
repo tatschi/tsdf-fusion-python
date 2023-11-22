@@ -168,110 +168,107 @@ class TSDFVolume:
             tsdf_vol_int[i] = (w_old[i] * tsdf_vol[i] + obs_weight * dist[i]) / w_new[i]
         return tsdf_vol_int, w_new
 
-    def integrate(self, pointcloud, colors):
+    def integrate(self, point_cloud, colors):
         """Integrate a depth frame into the TSDF volume.
 
     Args:
-      pointcloud (ndarray): A list of 3D points.
-      obs_weight (float): The weight to assign for the current observation. A higher
-        value
+      point_cloud (ndarray): A list of 3D points.
+      colors (ndarray): A list of RGB colors.
     """
         if self.gpu_mode:
-            # TODO calculate obs_weight based on color
-            obs_weight = 1.
-            # TODO fix GPU mode
-            pointcloud_x = np.array(pointcloud[:, 0].copy(order='C')).astype(np.float32)
-            pointcloud_y = np.array(pointcloud[:, 1].copy(order='C')).astype(np.float32)
-            pointcloud_z = np.array(pointcloud[:, 2].copy(order='C')).astype(np.float32)
-
-            voxels_x = np.zeros(len(pointcloud)).astype(np.int32)
-            voxels_y = np.zeros(len(pointcloud)).astype(np.int32)
-
-            # Run integration
-            self.init_gpu_grid(len(pointcloud))
-            for gpu_loop_idx in range(self._n_gpu_loops):
-                self._cuda_find_voxels(cuda.InOut(self._vol_origin.astype(np.float32)),
-                                       cuda.InOut(np.asarray([
-                                           gpu_loop_idx,
-                                           self._voxel_size,
-                                           self._trunc_margin,
-                                           obs_weight
-                                       ], np.float32)),
-                                       cuda.InOut(pointcloud_x),
-                                       cuda.InOut(pointcloud_y),
-                                       cuda.InOut(voxels_x),
-                                       cuda.InOut(voxels_y),
-                                       block=(self._max_gpu_threads_per_block, 1, 1),
-                                       grid=(
-                                           int(self._max_gpu_grid_dim[0]),
-                                           int(self._max_gpu_grid_dim[1]),
-                                           int(self._max_gpu_grid_dim[2]),
-                                       )
-                                       )
-
-            # repeat all values for all possible z values
-            voxels_x = np.repeat(voxels_x, self._vol_dim[2]).astype(np.int32)
-            voxels_y = np.repeat(voxels_y, self._vol_dim[2]).astype(np.int32)
-            points_z = np.repeat(pointcloud_z, self._vol_dim[2]).astype(np.float32)
-
-            z_vals = np.arange(self._vol_dim[2])
-            voxels_z = np.tile(z_vals, len(pointcloud)).astype(np.int32)
-
-            dists = np.zeros(len(points_z)).astype(np.float32)
-
-            self.init_gpu_grid(len(points_z))
-            for gpu_loop_idx in range(self._n_gpu_loops):
-                self._cuda_integrate(cuda.InOut(self._vol_origin.astype(np.float32)),
-                                     cuda.InOut(np.asarray([
-                                         gpu_loop_idx,
-                                         self._voxel_size,
-                                         self._trunc_margin,
-                                         obs_weight
-                                     ], np.float32)),
-                                     cuda.InOut(voxels_z),
-                                     cuda.InOut(points_z),
-                                     cuda.InOut(dists),
-                                     block=(self._max_gpu_threads_per_block, 1, 1),
-                                     grid=(
-                                         int(self._max_gpu_grid_dim[0]),
-                                         int(self._max_gpu_grid_dim[1]),
-                                         int(self._max_gpu_grid_dim[2]),
-                                     )
-                                     )
-
-            for i in range(len(dists)):
-                voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
-                w_old = self._weight_vol[voxel_index]
-                w_new = w_old + obs_weight
-                self._weight_vol[voxel_index] = w_new
-                tsdf_old = self._tsdf_vol[voxel_index]
-                self._tsdf_vol[voxel_index] = (tsdf_old * w_old + obs_weight * dists[i]) / w_new
-
+            self.integrate_gpu_mode(point_cloud, colors)
         else:
-            world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
-            depth_diff = np.zeros(world_coords.shape[0])
-            for point, color in zip(pointcloud, colors):
-                voxel_index_xy = np.asarray(np.floor((point[:2] - self._vol_origin[:2]) / self._voxel_size),
-                                            dtype=np.int64)
-                voxel_index_mask = np.logical_and(self.vox_coords[:, 0] == voxel_index_xy[0],
-                                                  self.vox_coords[:, 1] == voxel_index_xy[1])
-                voxel_indices = np.argwhere(voxel_index_mask)
+            self.integrate_cpu_mode(point_cloud, colors)
 
-                depth_diff[voxel_indices] = point[2] - world_coords[voxel_indices, 2]
+    def integrate_cpu_mode(self, point_cloud, colors):
+        world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
+        depth_diff = np.zeros(world_coords.shape[0])
+        for point, color in zip(point_cloud, colors):
+            voxel_index_xy = np.asarray(np.floor((point[:2] - self._vol_origin[:2]) / self._voxel_size),
+                                        dtype=np.int64)
+            voxel_index_mask = np.logical_and(self.vox_coords[:, 0] == voxel_index_xy[0],
+                                              self.vox_coords[:, 1] == voxel_index_xy[1])
+            voxel_indices = np.argwhere(voxel_index_mask)
 
-                # TODO maybe optimize this because it is only updating one voxel at a time
-                valid_pts = np.logical_and(depth_diff > 0, depth_diff >= -self._trunc_margin)
-                dist = np.minimum(1, depth_diff / self._trunc_margin)
-                valid_vox_x = self.vox_coords[valid_pts, 0]
-                valid_vox_y = self.vox_coords[valid_pts, 1]
-                valid_vox_z = self.vox_coords[valid_pts, 2]
-                w_old = self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z]
-                tsdf_vals = self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z]
-                valid_dist = dist[valid_pts]
-                obs_weight = color[1]
-                tsdf_vol_new, w_new = self.integrate_tsdf(tsdf_vals, valid_dist, w_old, obs_weight)
-                self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z] = w_new
-                self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
+            depth_diff[voxel_indices] = point[2] - world_coords[voxel_indices, 2]
+
+            # TODO maybe optimize this because it is only updating one voxel at a time
+            valid_pts = np.logical_and(depth_diff > 0, depth_diff >= -self._trunc_margin)
+            dist = np.minimum(1, depth_diff / self._trunc_margin)
+            valid_vox_x = self.vox_coords[valid_pts, 0]
+            valid_vox_y = self.vox_coords[valid_pts, 1]
+            valid_vox_z = self.vox_coords[valid_pts, 2]
+            w_old = self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z]
+            tsdf_vals = self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z]
+            valid_dist = dist[valid_pts]
+            obs_weight = color[1]
+            tsdf_vol_new, w_new = self.integrate_tsdf(tsdf_vals, valid_dist, w_old, obs_weight)
+            self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z] = w_new
+            self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
+
+    def integrate_gpu_mode(self, point_cloud, colors):
+        # TODO calculate obs_weight based on color
+        obs_weight = 1.
+        # TODO fix GPU mode
+        point_cloud_x = np.array(point_cloud[:, 0].copy(order='C')).astype(np.float32)
+        point_cloud_y = np.array(point_cloud[:, 1].copy(order='C')).astype(np.float32)
+        point_cloud_z = np.array(point_cloud[:, 2].copy(order='C')).astype(np.float32)
+        voxels_x = np.zeros(len(point_cloud)).astype(np.int32)
+        voxels_y = np.zeros(len(point_cloud)).astype(np.int32)
+        # Run integration
+        self.init_gpu_grid(len(point_cloud))
+        for gpu_loop_idx in range(self._n_gpu_loops):
+            self._cuda_find_voxels(cuda.InOut(self._vol_origin.astype(np.float32)),
+                                   cuda.InOut(np.asarray([
+                                       gpu_loop_idx,
+                                       self._voxel_size,
+                                       self._trunc_margin,
+                                       obs_weight
+                                   ], np.float32)),
+                                   cuda.InOut(point_cloud_x),
+                                   cuda.InOut(point_cloud_y),
+                                   cuda.InOut(voxels_x),
+                                   cuda.InOut(voxels_y),
+                                   block=(self._max_gpu_threads_per_block, 1, 1),
+                                   grid=(
+                                       int(self._max_gpu_grid_dim[0]),
+                                       int(self._max_gpu_grid_dim[1]),
+                                       int(self._max_gpu_grid_dim[2]),
+                                   )
+                                   )
+        # repeat all values for all possible z values
+        voxels_x = np.repeat(voxels_x, self._vol_dim[2]).astype(np.int32)
+        voxels_y = np.repeat(voxels_y, self._vol_dim[2]).astype(np.int32)
+        points_z = np.repeat(point_cloud_z, self._vol_dim[2]).astype(np.float32)
+        z_vals = np.arange(self._vol_dim[2])
+        voxels_z = np.tile(z_vals, len(point_cloud)).astype(np.int32)
+        dists = np.zeros(len(points_z)).astype(np.float32)
+        self.init_gpu_grid(len(points_z))
+        for gpu_loop_idx in range(self._n_gpu_loops):
+            self._cuda_integrate(cuda.InOut(self._vol_origin.astype(np.float32)),
+                                 cuda.InOut(np.asarray([
+                                     gpu_loop_idx,
+                                     self._voxel_size,
+                                     self._trunc_margin,
+                                     obs_weight
+                                 ], np.float32)),
+                                 cuda.InOut(voxels_z),
+                                 cuda.InOut(points_z),
+                                 cuda.InOut(dists),
+                                 block=(self._max_gpu_threads_per_block, 1, 1),
+                                 grid=(
+                                     int(self._max_gpu_grid_dim[0]),
+                                     int(self._max_gpu_grid_dim[1]),
+                                     int(self._max_gpu_grid_dim[2]),
+                                 )
+                                 )
+        for i in range(len(dists)):
+            voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
+            w_old = self._weight_vol[voxel_index]
+            w_new = w_old + obs_weight
+            self._weight_vol[voxel_index] = w_new
+            tsdf_old = self._tsdf_vol[voxel_index]
+            self._tsdf_vol[voxel_index] = (tsdf_old * w_old + obs_weight * dists[i]) / w_new
 
     def init_gpu_grid(self, n_points):
         gpu_dev = cuda.Device(0)
@@ -328,7 +325,7 @@ class TSDFVolume:
 
 
 def rigid_transform(xyz, transform):
-    """Applies a rigid transform to an (N, 3) pointcloud.
+    """Applies a rigid transform to an (N, 3) point cloud.
   """
     xyz_h = np.hstack([xyz, np.ones((len(xyz), 1), dtype=np.float32)])
     xyz_t_h = np.dot(transform, xyz_h.T).T
@@ -352,11 +349,11 @@ def get_view_frustum(depth_im, cam_intr, cam_pose):
     return view_frust_pts
 
 
-def get_vol_bnds(pointclouds):
-    pointclouds = np.vstack(pointclouds)
+def get_vol_bnds(point_clouds):
+    point_clouds = np.vstack(point_clouds)
     vol_bnds = np.zeros((3, 2))
-    vol_bnds[:, 0] = np.min(pointclouds, axis=0)
-    vol_bnds[:, 1] = np.max(pointclouds, axis=0)
+    vol_bnds[:, 0] = np.min(point_clouds, axis=0)
+    vol_bnds[:, 1] = np.max(point_clouds, axis=0)
     return vol_bnds
 
 
