@@ -132,6 +132,10 @@ class TSDFVolume:
 
     def integrate_cpu_mode(self, point_cloud, colors):
         world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
+
+        if len(colors) == 0:
+            colors = np.ones(point_cloud.shape)
+
         for point, color in zip(point_cloud, colors):
             depth_diff = np.zeros(world_coords.shape[0])
             voxel_index_xy = np.asarray(np.floor((point[:2] - self._vol_origin[:2]) / self._voxel_size),
