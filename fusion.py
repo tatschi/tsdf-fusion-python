@@ -161,8 +161,7 @@ class TSDFVolume:
             w_old = self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z]
             tsdf_vals = self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z]
             valid_dist = dist[valid_pts]
-            obs_weight = color[1]
-            tsdf_vol_new, w_new = self.integrate_tsdf(tsdf_vals, valid_dist, w_old, obs_weight)
+            tsdf_vol_new, w_new = self.integrate_tsdf(tsdf_vals, valid_dist, w_old, color[1])
             self._weight_vol[valid_vox_x, valid_vox_y, valid_vox_z] = w_new
             self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
 
