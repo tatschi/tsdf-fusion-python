@@ -161,12 +161,48 @@ class TSDFVolume:
             self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
 
     def integrate_gpu_mode(self, point_cloud, colors):
+        voxels_x, voxels_y = self.find_relevant_voxels_gpu_mode(point_cloud)
+        # repeat all values for all possible z values
+        voxels_x = np.repeat(voxels_x, self._vol_dim[2]).astype(np.int32)
+        voxels_y = np.repeat(voxels_y, self._vol_dim[2]).astype(np.int32)
+        points_z = np.repeat(point_cloud[:, 2], self._vol_dim[2]).astype(np.float32)
+        colors_rep = np.repeat(colors, self._vol_dim[2], axis=0)
+        z_vals = np.arange(self._vol_dim[2])
+        voxels_z = np.tile(z_vals, len(point_cloud)).astype(np.int32)
+        dists = np.zeros(len(points_z)).astype(np.float32)
+        self.init_gpu_grid(len(points_z))
+        for gpu_loop_idx in range(self._n_gpu_loops):
+            self._cuda_compute_dist_between_point_and_voxel(cuda.InOut(self._vol_origin.astype(np.float32)),
+                                                            cuda.InOut(np.asarray([
+                                                                gpu_loop_idx,
+                                                                self._voxel_size,
+                                                                self._trunc_margin
+                                                            ], np.float32)),
+                                                            cuda.InOut(voxels_z),
+                                                            cuda.InOut(points_z),
+                                                            cuda.InOut(dists),
+                                                            block=(self._max_gpu_threads_per_block, 1, 1),
+                                                            grid=self.gpu_grid
+                                                            )
+        for i in range(len(dists)):
+            voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
+            if dists[i] == 0:
+                continue
+            w_old = self._weight_vol[voxel_index]
+            obs_weight = colors_rep[i, 1]
+            w_new = w_old + obs_weight
+            self._weight_vol[voxel_index] = w_new
+            tsdf_old = self._tsdf_vol[voxel_index]
+            self._tsdf_vol[voxel_index] = (tsdf_old * w_old + obs_weight * dists[i]) / w_new
+
+    def find_relevant_voxels_gpu_mode(self, point_cloud):
         point_cloud_x = np.array(point_cloud[:, 0]).astype(np.float32)
         point_cloud_y = np.array(point_cloud[:, 1]).astype(np.float32)
-        point_cloud_z = np.array(point_cloud[:, 2]).astype(np.float32)
+
+        # prepare output arrays
         voxels_x = np.zeros(len(point_cloud)).astype(np.int32)
         voxels_y = np.zeros(len(point_cloud)).astype(np.int32)
-        # Run integration
+
         self.init_gpu_grid(len(point_cloud))
         for gpu_loop_idx in range(self._n_gpu_loops):
             self._cuda_find_voxels(cuda.InOut(self._vol_origin.astype(np.float32)),
@@ -182,38 +218,7 @@ class TSDFVolume:
                                    block=(self._max_gpu_threads_per_block, 1, 1),
                                    grid=self.gpu_grid
                                    )
-        # repeat all values for all possible z values
-        voxels_x = np.repeat(voxels_x, self._vol_dim[2]).astype(np.int32)
-        voxels_y = np.repeat(voxels_y, self._vol_dim[2]).astype(np.int32)
-        points_z = np.repeat(point_cloud_z, self._vol_dim[2]).astype(np.float32)
-        colors_rep = np.repeat(colors, self._vol_dim[2], axis=0)
-        z_vals = np.arange(self._vol_dim[2])
-        voxels_z = np.tile(z_vals, len(point_cloud)).astype(np.int32)
-        dists = np.zeros(len(points_z)).astype(np.float32)
-        self.init_gpu_grid(len(points_z))
-        for gpu_loop_idx in range(self._n_gpu_loops):
-            self._cuda_integrate(cuda.InOut(self._vol_origin.astype(np.float32)),
-                                 cuda.InOut(np.asarray([
-                                     gpu_loop_idx,
-                                     self._voxel_size,
-                                     self._trunc_margin
-                                 ], np.float32)),
-                                 cuda.InOut(voxels_z),
-                                 cuda.InOut(points_z),
-                                 cuda.InOut(dists),
-                                 block=(self._max_gpu_threads_per_block, 1, 1),
-                                 grid=self.gpu_grid
-                                 )
-        for i in range(len(dists)):
-            voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
-            if dists[i] == 0:
-                continue
-            w_old = self._weight_vol[voxel_index]
-            obs_weight = colors_rep[i, 1]
-            w_new = w_old + obs_weight
-            self._weight_vol[voxel_index] = w_new
-            tsdf_old = self._tsdf_vol[voxel_index]
-            self._tsdf_vol[voxel_index] = (tsdf_old * w_old + obs_weight * dists[i]) / w_new
+        return voxels_x, voxels_y
 
     def init_gpu_grid(self, n_points):
         gpu_dev = cuda.Device(0)
