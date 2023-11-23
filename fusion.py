@@ -125,6 +125,8 @@ class TSDFVolume:
       point_cloud (ndarray): A list of 3D points.
       colors (ndarray): A list of RGB colors.
     """
+        if len(colors) == 0:
+            colors = np.ones(point_cloud.shape)
         if self.gpu_mode:
             self.integrate_gpu_mode(point_cloud, colors)
         else:
@@ -132,9 +134,6 @@ class TSDFVolume:
 
     def integrate_cpu_mode(self, point_cloud, colors):
         world_coords = self.vox2world(self._vol_origin, self.vox_coords, self._voxel_size)
-
-        if len(colors) == 0:
-            colors = np.ones(point_cloud.shape)
 
         for point, color in zip(point_cloud, colors):
             depth_diff = np.zeros(world_coords.shape[0])
@@ -193,6 +192,7 @@ class TSDFVolume:
         voxels_x = np.repeat(voxels_x, self._vol_dim[2]).astype(np.int32)
         voxels_y = np.repeat(voxels_y, self._vol_dim[2]).astype(np.int32)
         points_z = np.repeat(point_cloud_z, self._vol_dim[2]).astype(np.float32)
+        colors_rep = np.repeat(colors, self._vol_dim[2], axis=0)
         z_vals = np.arange(self._vol_dim[2])
         voxels_z = np.tile(z_vals, len(point_cloud)).astype(np.int32)
         dists = np.zeros(len(points_z)).astype(np.float32)
@@ -220,6 +220,7 @@ class TSDFVolume:
             if dists[i] == 0:
                 continue
             w_old = self._weight_vol[voxel_index]
+            obs_weight = colors_rep[i, 1]
             w_new = w_old + obs_weight
             self._weight_vol[voxel_index] = w_new
             tsdf_old = self._tsdf_vol[voxel_index]
