@@ -29,6 +29,7 @@ class TSDFVolume:
         xyz bounds (min/max) in meters.
       voxel_size (float): The volume discretization in meters.
     """
+        self.gpu_grid = None
         self._n_gpu_loops = None
         self._max_gpu_grid_dim = None
         self._max_gpu_threads_per_block = None
@@ -179,11 +180,7 @@ class TSDFVolume:
                                    cuda.InOut(voxels_x),
                                    cuda.InOut(voxels_y),
                                    block=(self._max_gpu_threads_per_block, 1, 1),
-                                   grid=(
-                                       int(self._max_gpu_grid_dim[0]),
-                                       int(self._max_gpu_grid_dim[1]),
-                                       int(self._max_gpu_grid_dim[2]),
-                                   )
+                                   grid=self.gpu_grid
                                    )
         # repeat all values for all possible z values
         voxels_x = np.repeat(voxels_x, self._vol_dim[2]).astype(np.int32)
@@ -205,11 +202,7 @@ class TSDFVolume:
                                  cuda.InOut(points_z),
                                  cuda.InOut(dists),
                                  block=(self._max_gpu_threads_per_block, 1, 1),
-                                 grid=(
-                                     int(self._max_gpu_grid_dim[0]),
-                                     int(self._max_gpu_grid_dim[1]),
-                                     int(self._max_gpu_grid_dim[2]),
-                                 )
+                                 grid=self.gpu_grid
                                  )
         for i in range(len(dists)):
             voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
@@ -245,6 +238,7 @@ class TSDFVolume:
         grid_dim_z = min(gpu_dev.MAX_GRID_DIM_Z, grid_dim_z)
 
         self._max_gpu_grid_dim = np.array([grid_dim_x, grid_dim_y, grid_dim_z]).astype(int)
+        self.gpu_grid = int(self._max_gpu_grid_dim[0]), int(self._max_gpu_grid_dim[1]), int(self._max_gpu_grid_dim[2])
 
     def get_volume(self):
         return self._tsdf_vol
