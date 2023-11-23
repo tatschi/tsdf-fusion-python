@@ -62,18 +62,21 @@ class TSDFVolume:
         if self.gpu_mode:
             self.load_cuda_functions()
         else:
-            # Get voxel grid coordinates
-            xv, yv, zv = np.meshgrid(
-                range(self._vol_dim[0]),
-                range(self._vol_dim[1]),
-                range(self._vol_dim[2]),
-                indexing='ij'
-            )
-            self.vox_coords = np.concatenate([
-                xv.reshape(1, -1),
-                yv.reshape(1, -1),
-                zv.reshape(1, -1)
-            ], axis=0).astype(int).T
+            self.prepare_voxel_grid()
+
+    def prepare_voxel_grid(self):
+        # Get voxel grid coordinates
+        xv, yv, zv = np.meshgrid(
+            range(self._vol_dim[0]),
+            range(self._vol_dim[1]),
+            range(self._vol_dim[2]),
+            indexing='ij'
+        )
+        self.vox_coords = np.concatenate([
+            xv.reshape(1, -1),
+            yv.reshape(1, -1),
+            zv.reshape(1, -1)
+        ], axis=0).astype(int).T
 
     def load_cuda_functions(self):
         # Cuda kernel function (C++)
