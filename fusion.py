@@ -168,13 +168,33 @@ class TSDFVolume:
 
     def integrate_gpu_mode(self, point_cloud, colors):
         voxels_x, voxels_y = self.find_relevant_voxels_gpu_mode(point_cloud)
+
         # repeat all values for all possible z values
+        colors_rep = np.repeat(colors, self._vol_dim[2], axis=0)
         voxels_x = np.repeat(voxels_x, self._vol_dim[2]).astype(np.int32)
         voxels_y = np.repeat(voxels_y, self._vol_dim[2]).astype(np.int32)
-        points_z = np.repeat(point_cloud[:, 2], self._vol_dim[2]).astype(np.float32)
-        colors_rep = np.repeat(colors, self._vol_dim[2], axis=0)
         z_vals = np.arange(self._vol_dim[2])
         voxels_z = np.tile(z_vals, len(point_cloud)).astype(np.int32)
+
+        dists = self.compute_dist_between_points_and_voxels_gpu_mode(point_cloud, voxels_z)
+
+        self.integrate_tsdf_gpu_mode(colors_rep, dists, voxels_x, voxels_y, voxels_z)
+
+    def integrate_tsdf_gpu_mode(self, colors, dists, voxels_x, voxels_y, voxels_z):
+        for i in range(len(dists)):
+            voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
+            if dists[i] == 0:
+                continue
+            w_old = self._weight_vol[voxel_index]
+            obs_weight = colors[i, 1]
+            w_new = w_old + obs_weight
+            self._weight_vol[voxel_index] = w_new
+            tsdf_old = self._tsdf_vol[voxel_index]
+            self._tsdf_vol[voxel_index] = (tsdf_old * w_old + obs_weight * dists[i]) / w_new
+
+    def compute_dist_between_points_and_voxels_gpu_mode(self, point_cloud, voxels_z):
+        points_z = np.repeat(point_cloud[:, 2], self._vol_dim[2]).astype(np.float32)
+        # prepare output array
         dists = np.zeros(len(points_z)).astype(np.float32)
         self.init_gpu_grid(len(points_z))
         for gpu_loop_idx in range(self._n_gpu_loops):
@@ -190,16 +210,7 @@ class TSDFVolume:
                                                             block=(self._max_gpu_threads_per_block, 1, 1),
                                                             grid=self.gpu_grid
                                                             )
-        for i in range(len(dists)):
-            voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
-            if dists[i] == 0:
-                continue
-            w_old = self._weight_vol[voxel_index]
-            obs_weight = colors_rep[i, 1]
-            w_new = w_old + obs_weight
-            self._weight_vol[voxel_index] = w_new
-            tsdf_old = self._tsdf_vol[voxel_index]
-            self._tsdf_vol[voxel_index] = (tsdf_old * w_old + obs_weight * dists[i]) / w_new
+        return dists
 
     def find_relevant_voxels_gpu_mode(self, point_cloud):
         point_cloud_x = np.array(point_cloud[:, 0]).astype(np.float32)
