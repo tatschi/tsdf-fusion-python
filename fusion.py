@@ -160,9 +160,9 @@ class TSDFVolume:
             self._tsdf_vol[valid_vox_x, valid_vox_y, valid_vox_z] = tsdf_vol_new
 
     def integrate_gpu_mode(self, point_cloud, colors):
-        point_cloud_x = np.array(point_cloud[:, 0].copy(order='C')).astype(np.float32)
-        point_cloud_y = np.array(point_cloud[:, 1].copy(order='C')).astype(np.float32)
-        point_cloud_z = np.array(point_cloud[:, 2].copy(order='C')).astype(np.float32)
+        point_cloud_x = np.array(point_cloud[:, 0]).astype(np.float32)
+        point_cloud_y = np.array(point_cloud[:, 1]).astype(np.float32)
+        point_cloud_z = np.array(point_cloud[:, 2]).astype(np.float32)
         voxels_x = np.zeros(len(point_cloud)).astype(np.int32)
         voxels_y = np.zeros(len(point_cloud)).astype(np.int32)
         # Run integration
