@@ -60,13 +60,7 @@ class TSDFVolume:
         self.gpu_mode = use_gpu and FUSION_GPU_MODE
 
         if self.gpu_mode:
-
-            # Cuda kernel function (C++)
-            with open("kernels.cpp") as file:
-                self._cuda_src_mod = SourceModule(file.read())
-            self._cuda_find_voxels = self._cuda_src_mod.get_function("find_voxels_for_points")
-            self._cuda_compute_dist_between_point_and_voxel = self._cuda_src_mod \
-                .get_function("compute_dist_between_point_and_voxel")
+            self.load_cuda_functions()
         else:
             # Get voxel grid coordinates
             xv, yv, zv = np.meshgrid(
@@ -80,6 +74,14 @@ class TSDFVolume:
                 yv.reshape(1, -1),
                 zv.reshape(1, -1)
             ], axis=0).astype(int).T
+
+    def load_cuda_functions(self):
+        # Cuda kernel function (C++)
+        with open("kernels.cpp") as file:
+            self._cuda_src_mod = SourceModule(file.read())
+        self._cuda_find_voxels = self._cuda_src_mod.get_function("find_voxels_for_points")
+        self._cuda_compute_dist_between_point_and_voxel = self._cuda_src_mod \
+            .get_function("compute_dist_between_point_and_voxel")
 
     @staticmethod
     @njit(parallel=True)
