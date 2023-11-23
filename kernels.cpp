@@ -21,7 +21,7 @@ __global__ void find_voxels_for_points(
 }
 
 
-__global__ void integrate_point_cloud(
+__global__ void compute_dist_between_point_and_voxel(
                           float * vol_origin,
                           float * other_params,
                           int * voxels_z,
@@ -35,13 +35,10 @@ __global__ void integrate_point_cloud(
   float voxel_size = other_params[1];
   float trunc_margin = other_params[2];
 
-  float voxel_z = voxels_z[dists_idx];
-  float point_z = points_z[dists_idx];
-
   // Voxel grid z-coordinate to world coordinate
-  float voxel_world_z = vol_origin[2]+voxel_z*voxel_size;
+  float voxel_world_z = vol_origin[2] + voxels_z[dists_idx] * voxel_size;
 
-  float depth_diff = point_z - voxel_world_z;
+  float depth_diff = points_z[dists_idx] - voxel_world_z;
   if (depth_diff <= 0 || depth_diff < -trunc_margin){
       return;
   }

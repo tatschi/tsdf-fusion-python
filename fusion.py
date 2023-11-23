@@ -64,7 +64,7 @@ class TSDFVolume:
             with open("kernels.cpp") as file:
                 self._cuda_src_mod = SourceModule(file.read())
             self._cuda_find_voxels = self._cuda_src_mod.get_function("find_voxels_for_points")
-            self._cuda_integrate = self._cuda_src_mod.get_function("integrate_point_cloud")
+            self._cuda_integrate = self._cuda_src_mod.get_function("compute_dist_between_point_and_voxel")
         else:
             # Get voxel grid coordinates
             xv, yv, zv = np.meshgrid(
