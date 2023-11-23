@@ -159,7 +159,6 @@ class TSDFVolume:
     def integrate_gpu_mode(self, point_cloud, colors):
         # TODO calculate obs_weight based on color
         obs_weight = 1.
-        # TODO fix GPU mode
         point_cloud_x = np.array(point_cloud[:, 0].copy(order='C')).astype(np.float32)
         point_cloud_y = np.array(point_cloud[:, 1].copy(order='C')).astype(np.float32)
         point_cloud_z = np.array(point_cloud[:, 2].copy(order='C')).astype(np.float32)
@@ -214,6 +213,8 @@ class TSDFVolume:
                                  )
         for i in range(len(dists)):
             voxel_index = voxels_x[i], voxels_y[i], voxels_z[i]
+            if dists[i] == 0:
+                continue
             w_old = self._weight_vol[voxel_index]
             w_new = w_old + obs_weight
             self._weight_vol[voxel_index] = w_new
